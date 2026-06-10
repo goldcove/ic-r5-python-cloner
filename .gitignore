@@ -1,0 +1,12 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+
+# Radio backups and generated images may contain personal programming data.
+*.tr5
+*.tr5.org
+
+# Local channel exports and edited programming files.
+/kanaler*.csv
+/kanaler*.csv.org
