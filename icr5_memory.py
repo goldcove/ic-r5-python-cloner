@@ -101,7 +101,7 @@ def _decimal(value: str, name: str, channel: int) -> Decimal:
     try:
         return Decimal(value)
     except InvalidOperation as exc:
-        raise ICR5Error(f"Kanal {channel}: ugyldig {name}: {value!r}") from exc
+        raise ICR5Error(f"Channel {channel}: invalid {name}: {value!r}") from exc
 
 
 def _format_mhz(value: Decimal) -> str:
@@ -124,7 +124,7 @@ def _encode_frequency(
     if value == 0:
         return b"\x00\x00\x00"
     if not Decimal("0.100") <= value <= Decimal("1309.995"):
-        raise ICR5Error(f"Kanal {channel}: frekvens utenfor området: {value}")
+        raise ICR5Error(f"Channel {channel}: frequency is out of range: {value}")
     preferred = tuple(INTERNAL_STEP).index(WORKING_STEP[display_step])
     codes = [preferred_code, preferred, 0, 1, 2, 3]
     for code in dict.fromkeys(code for code in codes if code is not None):
@@ -135,7 +135,7 @@ def _encode_frequency(
             final = _set_field(0, 2, 3, code)
             final = _set_field(final, 6, 7, multiplier >> 16)
             return bytes((multiplier & 0xFF, (multiplier >> 8) & 0xFF, final))
-    raise ICR5Error(f"Kanal {channel}: frekvensen {value} MHz kan ikke kodes av IC-R5")
+    raise ICR5Error(f"Channel {channel}: the IC-R5 cannot encode {value} MHz")
 
 
 def _decode_offset(raw: bytes, multiplier_byte: int) -> Decimal:
@@ -152,7 +152,7 @@ def _encode_offset(
     preferred_code: int | None = None,
 ) -> tuple[bytes, int]:
     if not Decimal(0) <= value <= Decimal("159.995"):
-        raise ICR5Error(f"Kanal {channel}: ugyldig offset: {value}")
+        raise ICR5Error(f"Channel {channel}: invalid offset: {value}")
     preferred = tuple(INTERNAL_STEP).index(WORKING_STEP[display_step])
     codes = [preferred_code, preferred, 0, 1, 2, 3]
     for code in dict.fromkeys(code for code in codes if code is not None):
@@ -161,7 +161,7 @@ def _encode_offset(
         encoded_value = Decimal(multiplier) * step / Decimal(1000)
         if abs(encoded_value - value) <= Decimal("0.00001") and multiplier <= 0xFFFF:
             return multiplier.to_bytes(2, "little"), code
-    raise ICR5Error(f"Kanal {channel}: offset {value} MHz kan ikke kodes av IC-R5")
+    raise ICR5Error(f"Channel {channel}: the IC-R5 cannot encode offset {value} MHz")
 
 
 def _decode_label(raw: bytes) -> str:
@@ -180,7 +180,9 @@ def _encode_label(label: str, channel: int) -> bytes:
     label = label.upper()[:6].ljust(6)
     unsupported = sorted({char for char in label if char not in LABEL_ENCODE})
     if unsupported:
-        raise ICR5Error(f"Kanal {channel}: tegn støttes ikke i etikett: {''.join(unsupported)!r}")
+        raise ICR5Error(
+            f"Channel {channel}: unsupported label characters: {''.join(unsupported)!r}"
+        )
     n = [LABEL_ENCODE[char] for char in label]
     raw = [0] * 5
     raw[0] = _set_field(raw[0], 4, 7, n[0] >> 2)
@@ -197,7 +199,7 @@ def _encode_label(label: str, channel: int) -> bytes:
 
 def decode_channels(image: bytes) -> list[Channel]:
     if len(image) != IMAGE_SIZE:
-        raise ICR5Error(f"Bildet må være {IMAGE_SIZE} byte")
+        raise ICR5Error(f"The image must be {IMAGE_SIZE} bytes")
     channels = []
     for number in range(CHANNEL_COUNT):
         base = number * RECORD_SIZE
@@ -231,7 +233,7 @@ def decode_channels(image: bytes) -> list[Channel]:
 
 def export_csv(image: bytes, path: Path, delimiter: str = ",") -> None:
     if delimiter not in (",", ";"):
-        raise ICR5Error("CSV-feltdeler må være komma eller semikolon")
+        raise ICR5Error("The CSV delimiter must be a comma or semicolon")
     with path.open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS, delimiter=delimiter)
         writer.writeheader()
@@ -243,7 +245,7 @@ def _validate(channel: Channel) -> None:
     number = channel.Mem
     channel.Enabled = channel.Enabled.strip().lower()
     if channel.Enabled not in ("yes", "no"):
-        raise ICR5Error(f"Kanal {number}: Enabled må være yes eller no")
+        raise ICR5Error(f"Channel {number}: Enabled must be yes or no")
     if channel.Enabled == "no":
         return
     channel.Mode = channel.Mode.strip().upper()
@@ -257,35 +259,37 @@ def _validate(channel: Channel) -> None:
     channel.Bank = channel.Bank.strip().upper()
     channel.Ch = channel.Ch.strip()
     if channel.Mode not in MODES:
-        raise ICR5Error(f"Kanal {number}: ugyldig Mode {channel.Mode!r}")
+        raise ICR5Error(f"Channel {number}: invalid Mode {channel.Mode!r}")
     if channel.Step not in STEPS:
-        raise ICR5Error(f"Kanal {number}: ugyldig Step {channel.Step!r}")
+        raise ICR5Error(f"Channel {number}: invalid Step {channel.Step!r}")
     if channel.Duplex not in ("", "+", "-"):
-        raise ICR5Error(f"Kanal {number}: ugyldig Duplex {channel.Duplex!r}")
+        raise ICR5Error(f"Channel {number}: invalid Duplex {channel.Duplex!r}")
     if channel.TSQL not in TONE_FLAGS:
-        raise ICR5Error(f"Kanal {number}: ugyldig TSQL {channel.TSQL!r}")
+        raise ICR5Error(f"Channel {number}: invalid TSQL {channel.TSQL!r}")
     if channel.CTCSS not in CTCSS_VALUES:
-        raise ICR5Error(f"Kanal {number}: ugyldig CTCSS {channel.CTCSS!r}")
+        raise ICR5Error(f"Channel {number}: invalid CTCSS {channel.CTCSS!r}")
     if channel.DCS not in DCS_VALUES:
-        raise ICR5Error(f"Kanal {number}: ugyldig DCS {channel.DCS!r}")
+        raise ICR5Error(f"Channel {number}: invalid DCS {channel.DCS!r}")
     if channel.Polarity not in ("n", "r", "normal", "reverse"):
-        raise ICR5Error(f"Kanal {number}: ugyldig Polarity {channel.Polarity!r}")
+        raise ICR5Error(f"Channel {number}: invalid Polarity {channel.Polarity!r}")
     channel.Polarity = channel.Polarity[0]
     if channel.Skip not in SKIP_VALUES:
-        raise ICR5Error(f"Kanal {number}: ugyldig Skip {channel.Skip!r}")
+        raise ICR5Error(f"Channel {number}: invalid Skip {channel.Skip!r}")
     if channel.Bank and channel.Bank not in BANKS:
-        raise ICR5Error(f"Kanal {number}: ugyldig Bank {channel.Bank!r}")
+        raise ICR5Error(f"Channel {number}: invalid Bank {channel.Bank!r}")
     if channel.Ch and (not channel.Ch.isdigit() or not 0 <= int(channel.Ch) <= 99):
-        raise ICR5Error(f"Kanal {number}: bankkanal må være 0-99")
+        raise ICR5Error(f"Channel {number}: bank channel must be between 0 and 99")
     if bool(channel.Bank) != bool(channel.Ch):
-        raise ICR5Error(f"Kanal {number}: Bank og Ch må enten begge være satt eller begge tomme")
+        raise ICR5Error(
+            f"Channel {number}: Bank and Ch must either both be set or both be empty"
+        )
     if len(channel.Label) > 6:
-        raise ICR5Error(f"Kanal {number}: Label kan ha maksimalt 6 tegn")
+        raise ICR5Error(f"Channel {number}: Label may contain at most 6 characters")
 
 
 def import_csv(base_image: bytes, path: Path) -> bytes:
     if len(base_image) != IMAGE_SIZE:
-        raise ICR5Error(f"Grunnbildet må være {IMAGE_SIZE} byte")
+        raise ICR5Error(f"The base image must be {IMAGE_SIZE} bytes")
     image = bytearray(base_image)
     original_channels = decode_channels(base_image)
     seen = set()
@@ -296,18 +300,20 @@ def import_csv(base_image: bytes, path: Path) -> bytes:
         try:
             delimiter = csv.Sniffer().sniff(sample, delimiters=",;").delimiter
         except csv.Error as exc:
-            raise ICR5Error("Kunne ikke avgjøre om CSV bruker komma eller semikolon") from exc
+            raise ICR5Error(
+                "Could not determine whether the CSV uses commas or semicolons"
+            ) from exc
         reader = csv.DictReader(handle, delimiter=delimiter)
         missing = set(CSV_FIELDS) - set(reader.fieldnames or ())
         if missing:
-            raise ICR5Error(f"CSV mangler kolonner: {', '.join(sorted(missing))}")
+            raise ICR5Error(f"CSV is missing columns: {', '.join(sorted(missing))}")
         for line, row in enumerate(reader, 2):
             try:
                 number = int(row["Mem"])
             except (TypeError, ValueError) as exc:
-                raise ICR5Error(f"CSV-linje {line}: ugyldig Mem") from exc
+                raise ICR5Error(f"CSV line {line}: invalid Mem") from exc
             if not 0 <= number < CHANNEL_COUNT or number in seen:
-                raise ICR5Error(f"CSV-linje {line}: ugyldig eller duplisert Mem {number}")
+                raise ICR5Error(f"CSV line {line}: invalid or duplicate Mem {number}")
             seen.add(number)
             channel = Channel(**{name: (number if name == "Mem" else row.get(name, "")) for name in CSV_FIELDS})
             _validate(channel)
@@ -315,10 +321,12 @@ def import_csv(base_image: bytes, path: Path) -> bytes:
             if channel.Enabled == "yes" and channel.Bank:
                 slot = (channel.Bank, int(channel.Ch))
                 if slot in bank_slots:
-                    raise ICR5Error(f"Kanal {number}: bankplass {channel.Bank}{channel.Ch} er duplisert")
+                    raise ICR5Error(
+                        f"Channel {number}: bank slot {channel.Bank}{channel.Ch} is duplicated"
+                    )
                 bank_slots.add(slot)
     if not seen:
-        raise ICR5Error("CSV-filen inneholder ingen kanalrader")
+        raise ICR5Error("The CSV file contains no channel rows")
     return bytes(image)
 
 

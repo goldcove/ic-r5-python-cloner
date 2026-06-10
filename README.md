@@ -1,20 +1,21 @@
-# IC-R5 Python-kloner
+# IC-R5 Python Cloner
 
-Dette er en liten kommandolinjeport av den grunnleggende
-klonefunksjonen i `tk5 0.6`: identifiser radioen, les et rått
-minnebilde og skriv et tidligere lagret bilde tilbake.
+This is a small command-line port of the core cloning functionality in
+`tk5 0.6`. It can identify the radio, read a raw memory image, export
+memory channels to CSV, rebuild an image from edited CSV data, and write
+the image back to the radio.
 
-## Viktig
+## Important
 
-Bruk en korrekt CI-V/TTL-adapter for IC-R5. En PL2303-brikke alene
-garanterer ikke riktige elektriske nivåer. Ikke koble en vanlig
-RS-232-utgang direkte til radioen.
+Use a proper CI-V/TTL adapter for the IC-R5. A PL2303 chip alone does not
+guarantee correct electrical levels. Do not connect a normal RS-232
+output directly to the radio.
 
-Ta alltid en backup før skriving. Et gyldig råbilde er nøyaktig
-28 672 byte. Programmet nekter å skrive andre filstørrelser og krever
-det eksplisitte flagget `--yes`.
+Always create a backup before writing. A valid raw image is exactly
+28,672 bytes. The program rejects other image sizes and requires the
+explicit `--yes` option before writing.
 
-## Oppsett
+## Setup
 
 ```sh
 python3 -m venv .venv
@@ -22,73 +23,75 @@ source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 ```
 
-## Bruk
+## Usage
 
-Finn seriellporten:
+List serial ports:
 
 ```sh
 python3 icr5.py ports
 ```
 
-Test kommunikasjon:
+Test communication:
 
 ```sh
 python3 icr5.py info /dev/cu.usbserial-XXXX
 ```
 
-Les radioen til både rå backup og menneskelesbar CSV:
+Read the radio to both a raw backup and a human-readable CSV file:
 
 ```sh
-python3 icr5.py read /dev/cu.usbserial-XXXX original.tr5 --csv kanaler.csv
+python3 icr5.py read /dev/cu.usbserial-XXXX original.tr5 --csv channels.csv
 ```
 
-For semikolon som feltdeler, vanlig i norsk Excel:
+Use a semicolon delimiter, which is common with European spreadsheet
+settings:
 
 ```sh
 python3 icr5.py read /dev/cu.usbserial-XXXX original.tr5 \
-  --csv kanaler.csv --csv-delimiter ";"
+  --csv channels.csv --csv-delimiter ";"
 ```
 
-Rediger `kanaler.csv` i et regneark eller tekstprogram. Behold
-kolonnenavnene. `Enabled` må være `yes` eller `no`; sett `no` for å
-slette en kanal. Ved import oppdages `,` eller `;` automatisk.
+Edit `channels.csv` in a spreadsheet or text editor. Keep the column
+names unchanged. `Enabled` must be `yes` or `no`; use `no` to delete a
+channel. Import automatically detects comma or semicolon delimiters.
 
-Bygg et nytt bilde fra CSV-en og den urørte backupen:
+Build a new image from the CSV file and the untouched backup:
 
 ```sh
-python3 icr5.py build-image original.tr5 kanaler.csv endret.tr5
+python3 icr5.py build-image original.tr5 channels.csv modified.tr5
 ```
 
-Skriv det nye bildet:
+Write the new image:
 
 ```sh
-python3 icr5.py write /dev/cu.usbserial-XXXX endret.tr5 --yes
+python3 icr5.py write /dev/cu.usbserial-XXXX modified.tr5 --yes
 ```
 
-Standardinnstillingen er 9600 baud, 8N1, DTR på og RTS av, tilsvarende
-TK5-oppsettet. Enkelte adaptere trenger `--no-dtr` eller `--rts`.
+The default serial configuration is 9600 baud, 8N1, DTR enabled, and
+RTS disabled, matching TK5. Some adapters may require `--no-dtr` or
+`--rts`.
 
-CSV-en inneholder alle 1000 kanalplasser. Følgende verdier brukes:
+The CSV file contains all 1,000 memory channel slots. Supported values:
 
-- `Mode`: `NFM`, `WFM` eller `AM`
+- `Mode`: `NFM`, `WFM`, or `AM`
 - `Step`: `5`, `6.25`, `8.33`, `9`, `10`, `12.5`, `15`, `20`, `25`,
-  `30`, `50` eller `100`
-- `Duplex`: tom, `+` eller `-`
-- `TSQL`: tom, `t`, `b`, `d` eller `p`
-- `Polarity`: `n` eller `r`
-- `Skip`: tom, `skip` eller `pskip`
-- `Bank`: tom eller en av `A B C D E F G H J L N O P Q R T U Y`
-- `Ch`: `0` til `99`; må være satt sammen med `Bank`
+  `30`, `50`, or `100`
+- `Duplex`: empty, `+`, or `-`
+- `TSQL`: empty, `t`, `b`, `d`, or `p`
+- `Polarity`: `n` or `r`
+- `Skip`: empty, `skip`, or `pskip`
+- `Bank`: empty or one of `A B C D E F G H J L N O P Q R T U Y`
+- `Ch`: `0` through `99`; it must be set together with `Bank`
 
-Bankbokstavene `I`, `K`, `M`, `S`, `V`, `W`, `X` og `Z` finnes ikke
-på IC-R5 og blir avvist ved import.
+Bank letters `I`, `K`, `M`, `S`, `V`, `W`, `X`, and `Z` do not exist
+on the IC-R5 and are rejected during import.
 
-Originalbildet er nødvendig ved CSV-import fordi det inneholder flere
-radioinnstillinger enn kanalene. Disse bevares uendret. Når en
-eksportert CSV bygges uten endringer, blir det nye `.tr5`-bildet
-byte-for-byte identisk med originalbildet.
+The original image is required during CSV import because it contains
+radio settings beyond the memory channels. These settings are preserved.
+If an exported CSV file is rebuilt without changes, the resulting
+`.tr5` image is byte-for-byte identical to the original image.
 
-`Step` er kanalens viste søke-/innstillingssteg. IC-R5 lagrer
-frekvensens interne kodingssteg separat. Programmet bevarer denne
-kodingen for uendrede kanaler og velger automatisk en gyldig intern
-koding når frekvensen endres.
+`Step` is the channel's displayed tuning step. The IC-R5 stores the
+internal frequency encoding step separately. The program preserves that
+encoding for unchanged channels and automatically selects a valid
+internal encoding when a frequency is changed.

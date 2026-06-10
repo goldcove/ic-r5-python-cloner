@@ -61,7 +61,10 @@ class ICR5:
         debug: bool = False,
     ) -> None:
         if serial is None:
-            raise ICR5Error("pyserial mangler; installer med: python3 -m pip install -r requirements.txt")
+            raise ICR5Error(
+                "pyserial is missing; install it with: "
+                "python3 -m pip install -r requirements.txt"
+            )
         self.port = port
         self.timeout = timeout
         self.dtr = dtr
@@ -123,7 +126,7 @@ class ICR5:
             else:
                 preamble_seen = 0
         else:
-            raise ICR5Error("Tidsavbrudd mens programmet ventet på radioen")
+            raise ICR5Error("Timed out while waiting for the radio")
 
         body = bytearray()
         while time.monotonic() < deadline:
@@ -133,16 +136,16 @@ class ICR5:
             value = byte[0]
             if value == TERMINATOR:
                 if len(body) < 3:
-                    raise ICR5Error("Radioen sendte en for kort CI-V-ramme")
+                    raise ICR5Error("The radio sent an incomplete CI-V frame")
                 result = bytes(body)
                 self._log("<--", PREAMBLE + result + bytes((TERMINATOR,)))
                 return result
             if value == 0xFC:
-                raise ICR5Error("CI-V-kollisjon eller kommunikasjonsfeil")
+                raise ICR5Error("CI-V collision or communication error")
             if value != 0xFE:
                 body.append(value)
 
-        raise ICR5Error("Tidsavbrudd midt i en CI-V-ramme")
+        raise ICR5Error("Timed out in the middle of a CI-V frame")
 
     def responses(self, sent_command: bytes | None = None) -> Iterator[bytes]:
         """Yield response bodies, discarding a cable echo when present."""
@@ -161,10 +164,10 @@ class ICR5:
         self.send(command)
         for body in self.responses(command):
             if body[:1] == b"\xFA":
-                raise ICR5Error("Radioen avviste forespørselen om modellinformasjon")
+                raise ICR5Error("The radio rejected the model information request")
             if body[:1] == b"\xE1":
                 if len(body) < 5:
-                    raise ICR5Error("Ufullstendig modellinformasjon fra radioen")
+                    raise ICR5Error("The radio returned incomplete model information")
                 return body[1:5]
         raise AssertionError("unreachable")
 
@@ -178,32 +181,34 @@ class ICR5:
             if body[:1] == b"\xE5":
                 break
             if body[:1] != b"\xE4" or len(body) != 73:
-                raise ICR5Error(f"Uventet kloneramme med {len(body)} byte")
+                raise ICR5Error(f"Unexpected clone frame containing {len(body)} bytes")
 
             packed = pack_hex(body[1:])
             data_with_header, received_checksum = packed[:-1], packed[-1]
             if checksum(data_with_header) != received_checksum:
-                raise ICR5Error("Kontrollsumfeil under lesing fra radio")
+                raise ICR5Error("Checksum mismatch while reading from the radio")
 
             address = int.from_bytes(data_with_header[:2], "big")
             count = data_with_header[2]
             payload = data_with_header[3:]
             if address != expected_address or count != CHUNK_SIZE or len(payload) != count:
                 raise ICR5Error(
-                    f"Uventet minneblokk: adresse 0x{address:04X}, lengde {count}"
+                    f"Unexpected memory block: address 0x{address:04X}, length {count}"
                 )
             image.extend(payload)
             expected_address += count
-            print(f"\rLeser: {len(image) * 100 // IMAGE_SIZE:3d} %", end="", file=sys.stderr)
+            print(f"\rReading: {len(image) * 100 // IMAGE_SIZE:3d} %", end="", file=sys.stderr)
         print(file=sys.stderr)
 
         if len(image) != IMAGE_SIZE:
-            raise ICR5Error(f"Ufullstendig bilde: fikk {len(image)}, forventet {IMAGE_SIZE} byte")
+            raise ICR5Error(
+                f"Incomplete image: received {len(image)}, expected {IMAGE_SIZE} bytes"
+            )
         return bytes(image)
 
     def write_image(self, version: bytes, image: bytes) -> None:
         if len(image) != IMAGE_SIZE:
-            raise ICR5Error(f"Bildet må være nøyaktig {IMAGE_SIZE} byte")
+            raise ICR5Error(f"The image must be exactly {IMAGE_SIZE} bytes")
 
         clone_in = b"\xE3" + version
         self.send(clone_in)
@@ -216,7 +221,11 @@ class ICR5:
             command = b"\xE4" + unpack_hex(packed)
             self.send(command)
             self._discard_optional_echo(command)
-            print(f"\rSkriver: {(offset + CHUNK_SIZE) * 100 // IMAGE_SIZE:3d} %", end="", file=sys.stderr)
+            print(
+                f"\rWriting: {(offset + CHUNK_SIZE) * 100 // IMAGE_SIZE:3d} %",
+                end="",
+                file=sys.stderr,
+            )
         print(file=sys.stderr)
 
         termination = b"\xE5Icom Inc.80"
@@ -224,7 +233,7 @@ class ICR5:
         for body in self.responses(termination):
             if body[:1] == b"\xE6":
                 if body[1:2] != b"\x00":
-                    raise ICR5Error("Radioen rapporterte feil etter skriving")
+                    raise ICR5Error("The radio reported an error after writing")
                 return
         raise AssertionError("unreachable")
 
@@ -239,49 +248,53 @@ class ICR5:
             except ICR5Error:
                 return
             if frame[1] != PC_ADDRESS or frame[2:] != command:
-                raise ICR5Error("Uventet svar mens programmet ventet på kabel-ekko")
+                raise ICR5Error("Unexpected response while waiting for a cable echo")
         finally:
             self.ser.timeout = old_timeout
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Les og skriv Icom IC-R5-klonebilder")
-    parser.add_argument("--debug", action="store_true", help="vis rå serielltrafikk")
-    parser.add_argument("--timeout", type=float, default=5.0, help="seriell tidsavbrudd i sekunder")
+    parser = argparse.ArgumentParser(description="Read and write Icom IC-R5 clone images")
+    parser.add_argument("--debug", action="store_true", help="show raw serial traffic")
+    parser.add_argument("--timeout", type=float, default=5.0, help="serial timeout in seconds")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("ports", help="list tilgjengelige seriellporter")
+    sub.add_parser("ports", help="list available serial ports")
     for name in ("info", "read", "write"):
         command = sub.add_parser(name)
-        command.add_argument("port", help="f.eks. /dev/cu.usbserial-... eller COM3")
+        command.add_argument("port", help="for example /dev/cu.usbserial-... or COM3")
         command.add_argument("--no-dtr", action="store_true")
         command.add_argument("--rts", action="store_true")
         if name == "read":
             command.add_argument("file", type=Path)
-            command.add_argument("--csv", type=Path, help="eksporter også kanalene til CSV")
+            command.add_argument("--csv", type=Path, help="also export channels to CSV")
             command.add_argument(
                 "--csv-delimiter",
                 choices=(",", ";"),
                 default=",",
-                help="feltdeler ved CSV-eksport (standard: komma)",
+                help="delimiter used for CSV export (default: comma)",
             )
         elif name == "write":
             command.add_argument("file", type=Path)
             command.add_argument(
                 "--yes",
                 action="store_true",
-                help="bekreft at bildet skal overskrive radioens programmering",
+                help="confirm that the image may overwrite the radio programming",
             )
-    export_command = sub.add_parser("export-csv", help="konverter et .tr5-bilde til lesbar CSV")
+    export_command = sub.add_parser(
+        "export-csv", help="convert a .tr5 image to human-readable CSV"
+    )
     export_command.add_argument("image", type=Path)
     export_command.add_argument("csv", type=Path)
     export_command.add_argument(
         "--delimiter",
         choices=(",", ";"),
         default=",",
-        help="feltdeler i CSV-filen (standard: komma)",
+        help="delimiter used in the CSV file (default: comma)",
     )
-    build_command = sub.add_parser("build-image", help="bygg et nytt .tr5-bilde fra CSV og backup")
+    build_command = sub.add_parser(
+        "build-image", help="build a new .tr5 image from CSV and a backup"
+    )
     build_command.add_argument("base_image", type=Path)
     build_command.add_argument("csv", type=Path)
     build_command.add_argument("output_image", type=Path)
@@ -297,16 +310,17 @@ def main() -> int:
             if args.command == "export-csv":
                 image = args.image.read_bytes()
                 export_csv(image, args.csv, delimiter=args.delimiter)
-                print(f"Eksporterte kanaler til {args.csv}")
+                print(f"Exported channels to {args.csv}")
             else:
                 image = import_csv(args.base_image.read_bytes(), args.csv)
                 args.output_image.write_bytes(image)
-                print(f"Bygget {args.output_image} ({len(image)} byte)")
+                print(f"Built {args.output_image} ({len(image)} bytes)")
             return 0
         if args.command == "ports":
             if list_ports is None:
                 raise ICR5Error(
-                    "pyserial mangler; installer med: python3 -m pip install -r requirements.txt"
+                    "pyserial is missing; install it with: "
+                    "python3 -m pip install -r requirements.txt"
                 )
             for port in list_ports.comports():
                 print(f"{port.device}\t{port.description}")
@@ -320,28 +334,30 @@ def main() -> int:
             debug=args.debug,
         ) as radio:
             version = radio.model_info()
-            print(f"Radio funnet, versjon: {version.hex(' ').upper()}", file=sys.stderr)
+            print(f"Radio found, version: {version.hex(' ').upper()}", file=sys.stderr)
 
             if args.command == "info":
                 return 0
             if args.command == "read":
                 image = radio.read_image(version)
                 args.file.write_bytes(image)
-                print(f"Skrev backup til {args.file} ({len(image)} byte)")
+                print(f"Wrote backup to {args.file} ({len(image)} bytes)")
                 if args.csv:
                     from icr5_memory import export_csv
 
                     export_csv(image, args.csv, delimiter=args.csv_delimiter)
-                    print(f"Eksporterte kanaler til {args.csv}")
+                    print(f"Exported channels to {args.csv}")
                 return 0
             if not args.yes:
-                raise ICR5Error("Skriving krever --yes. Ta alltid backup med read først.")
+                raise ICR5Error(
+                    "Writing requires --yes. Always create a backup with read first."
+                )
             image = args.file.read_bytes()
             radio.write_image(version, image)
-            print("Skriving fullført. Slå radioen av og på før bruk.")
+            print("Write completed. Power-cycle the radio before use.")
             return 0
     except (ICR5Error, OSError) as exc:
-        print(f"Feil: {exc}", file=sys.stderr)
+        print(f"Error: {exc}", file=sys.stderr)
         return 1
 
 
